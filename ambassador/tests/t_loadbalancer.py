@@ -16,7 +16,7 @@ metadata:
 spec:
   containers:
   - name: backend
-    image: quay.io/datawire/kat-backend:11
+    image: {kat_server_docker_image}
     ports:
     - containerPort: 8080
     env:
@@ -159,9 +159,9 @@ class GlobalLoadBalancing(AmbassadorTest):
     def manifests(self) -> str:
         backend = self.name.lower() + '-backend'
         return super().manifests() + \
-               LOADBALANCER_POD.format(name='{}-1'.format(self.path.k8s), backend=backend, backend_env='{}-1'.format(self.path.k8s)) + \
-               LOADBALANCER_POD.format(name='{}-2'.format(self.path.k8s), backend=backend, backend_env='{}-2'.format(self.path.k8s)) + \
-               LOADBALANCER_POD.format(name='{}-3'.format(self.path.k8s), backend=backend, backend_env='{}-3'.format(self.path.k8s)) + """
+               LOADBALANCER_POD.format(name='{}-1'.format(self.path.k8s), backend=backend, backend_env='{}-1'.format(self.path.k8s), kat_server_docker_image=os.environ['KAT_SERVER_DOCKER_IMAGE']) + \
+               LOADBALANCER_POD.format(name='{}-2'.format(self.path.k8s), backend=backend, backend_env='{}-2'.format(self.path.k8s), kat_server_docker_image=os.environ['KAT_SERVER_DOCKER_IMAGE']) + \
+               LOADBALANCER_POD.format(name='{}-3'.format(self.path.k8s), backend=backend, backend_env='{}-3'.format(self.path.k8s), kat_server_docker_image=os.environ['KAT_SERVER_DOCKER_IMAGE']) + """
 ---
 apiVersion: v1
 kind: Service

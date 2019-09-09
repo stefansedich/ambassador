@@ -318,6 +318,10 @@ class Node(ABC):
     def path(self) -> str:
         return self.relpath(None)
 
+    @property
+    def environ(self):
+        return os.environ
+
     def relpath(self, ancestor):
         if self.parent is ancestor:
             return Name(self.name, namespace=self.namespace)

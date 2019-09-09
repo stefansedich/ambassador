@@ -141,11 +141,13 @@ SCOUT_APP_KEY=
 # For details https://github.com/datawire/kat-backend
 #
 # Note that this must not start with the 'v'. Sigh.
-KAT_BACKEND_RELEASE = 1.5.0
+KAT_DOCKER_TAG = 1.6.0
 
-KAT_CLIENT_DOCKER_TAG ?= $(KAT_BACKEND_RELEASE)
 KAT_CLIENT_DOCKER_REPO ?= $(if $(filter-out -,$(DOCKER_REGISTRY)),$(DOCKER_REGISTRY)/)kat-client$(if $(IS_PRIVATE),-private)
-KAT_CLIENT_DOCKER_IMAGE ?= $(KAT_CLIENT_DOCKER_REPO):$(KAT_CLIENT_DOCKER_TAG)
+KAT_SERVER_DOCKER_REPO ?= $(if $(filter-out -,$(DOCKER_REGISTRY)),$(DOCKER_REGISTRY)/)kat-backend$(if $(IS_PRIVATE),-private)
+
+KAT_CLIENT_DOCKER_IMAGE ?= $(KAT_CLIENT_DOCKER_REPO):$(KAT_DOCKER_TAG)
+KAT_SERVER_DOCKER_IMAGE ?= $(KAT_SERVER_DOCKER_REPO):$(KAT_DOCKER_TAG)
 
 KAT_CLIENT ?= venv/bin/kat_client
 
@@ -225,6 +227,7 @@ print-vars:
 	@echo "GIT_TAG_SANITIZED                = $(GIT_TAG_SANITIZED)"
 	@echo "GIT_VERSION                      = $(GIT_VERSION)"
 	@echo "KAT_CLIENT_DOCKER_IMAGE          = $(KAT_CLIENT_DOCKER_IMAGE)"
+	@echo "KAT_SERVER_DOCKER_IMAGE          = $(KAT_SERVER_DOCKER_IMAGE)"
 	@echo "KUBECONFIG                       = $(KUBECONFIG)"
 	@echo "LATEST_RC                        = $(LATEST_RC)"
 	@echo "USE_KUBERNAUT                    = $(USE_KUBERNAUT)"
@@ -251,6 +254,7 @@ export-vars:
 	@echo "export GIT_TAG_SANITIZED='$(GIT_TAG_SANITIZED)'"
 	@echo "export GIT_VERSION='$(GIT_VERSION)'"
 	@echo "export KAT_CLIENT_DOCKER_IMAGE='$(KAT_CLIENT_DOCKER_IMAGE)'"
+	@echo "export KAT_SERVER_DOCKER_IMAGE='$(KAT_SERVER_DOCKER_IMAGE)'"
 	@echo "export KUBECONFIG='$(KUBECONFIG)'"
 	@echo "export LATEST_RC='$(LATEST_RC)'"
 	@echo "export USE_KUBERNAUT='$(USE_KUBERNAUT)'"
@@ -406,9 +410,18 @@ kat-client-docker-image/teleproxy: $(var.)TELEPROXY_VERSION
 	curl --fail -o $@ https://s3.amazonaws.com/datawire-static-files/teleproxy/$(TELEPROXY_VERSION)/linux/amd64/teleproxy
 
 # kat-client-docker-image/kat_client always uses the linux/amd64 architecture
-kat-client-docker-image/kat_client: venv/kat-backend-$(KAT_BACKEND_RELEASE).tar.gz $(var.)KAT_BACKEND_RELEASE
-	cd venv && tar -xzf $(<F) kat-backend-$(KAT_BACKEND_RELEASE)/client/bin/client_linux_amd64
-	install -m0755 venv/kat-backend-$(KAT_BACKEND_RELEASE)/client/bin/client_linux_amd64 $@
+kat-client-docker-image/kat_client: $(wildcard go/kat-client/*) go/apis/kat/echo.pb.go
+	GOOS=linux GOARCH=amd64 go build -o $@ ./go/kat-client
+
+kat-server-docker-image: kat-server.docker
+.PHONY: kat-server-docker-image
+kat-server.docker: $(wildcard kat-server-docker-image/*) kat-server-docker-image/kat-server
+	docker build $(DOCKER_OPTS) -t $(KAT_SERVER_DOCKER_IMAGE) kat-server-docker-image
+	@docker image inspect $(KAT_SERVER_DOCKER_IMAGE) --format='{{.Id}}' | $(WRITE_IFCHANGED) $@
+
+# kat-server-docker-image/kat-server always uses the linux/amd64 architecture
+kat-server-docker-image/kat-server: $(wildcard go/kat-server/* go/kat-server/*/*) go/apis/kat/echo.pb.go
+	GOOS=linux GOARCH=amd64 go build -o $@ ./go/kat-server
 
 docker-images: ambassador-docker-image
 
@@ -425,6 +438,11 @@ docker-push-kat-client: kat-client-docker-image
 	@echo 'PUSH $(KAT_CLIENT_DOCKER_IMAGE)'
 	@set -o pipefail; \
 		docker push $(KAT_CLIENT_DOCKER_IMAGE) | python releng/linify.py push.log
+
+docker-push-kat-server: kat-server-docker-image
+	@echo 'PUSH $(KAT_CLIENT_DOCKER_IMAGE)'
+	@set -o pipefail; \
+		docker push $(KAT_SERVER_DOCKER_IMAGE) | python releng/linify.py push.log
 
 # TODO: validate version is conformant to some set of rules might be a good idea to add here
 ambassador/ambassador/VERSION.py: FORCE $(WRITE_IFCHANGED)
@@ -472,11 +490,8 @@ $(KUBERNAUT): $(var.)KUBERNAUT_VERSION $(var.)GOOS $(var.)GOARCH | venv/bin/acti
 	curl -o $(KUBERNAUT) http://releases.datawire.io/kubernaut/$(KUBERNAUT_VERSION)/$(GOOS)/$(GOARCH)/kubernaut
 	chmod +x $(KUBERNAUT)
 
-venv/kat-backend-$(KAT_BACKEND_RELEASE).tar.gz: | venv/bin/activate
-	curl -L -o $@ https://github.com/datawire/kat-backend/archive/v$(KAT_BACKEND_RELEASE).tar.gz
-$(KAT_CLIENT): venv/kat-backend-$(KAT_BACKEND_RELEASE).tar.gz $(var.)KAT_BACKEND_RELEASE
-	cd venv && tar -xzf $(<F) kat-backend-$(KAT_BACKEND_RELEASE)/client/bin/client_$(GOOS)_$(GOARCH)
-	install -m0755 venv/kat-backend-$(KAT_BACKEND_RELEASE)/client/bin/client_$(GOOS)_$(GOARCH) $(CURDIR)/$(KAT_CLIENT)
+$(KAT_CLIENT): $(wildcard go/kat-client/*) go/apis/kat/echo.pb.go
+	GOOS=linux GOARCH=amd64 go build -o $@ ./go/kat-client
 
 setup-develop: venv $(KAT_CLIENT) $(TELEPROXY) $(KUBERNAUT) $(WATT) $(KUBESTATUS) version
 
@@ -601,7 +616,7 @@ release:
 	$(MAKE) SCOUT_APP_KEY=app.json STABLE_TXT_KEY=stable.txt update-aws
 
 # ------------------------------------------------------------------------------
-# Go gRPC bindings
+# Go gRPC bindings (Envoy)
 # ------------------------------------------------------------------------------
 
 # The version numbers of `protoc` (in this Makefile),
@@ -674,6 +689,70 @@ go/apis/envoy: envoy-src $(FLOCK) venv/bin/protoc venv/bin/protoc-gen-gogofast v
 	mkdir -p $(@D)
 	mv $(@D).envoy.tmp/envoy $@
 	rmdir $(@D).envoy.tmp
+
+# ------------------------------------------------------------------------------
+# gRPC bindings for KAT
+# ------------------------------------------------------------------------------
+
+GRPC_WEB_VERSION = 1.0.3
+GRPC_WEB_PLATFORM = $(GOOS)-x86_64
+
+venv/bin/protoc-gen-grpc-web: $(var.)GRPC_WEB_VERSION $(var.)GRPC_WEB_PLATFORM | venv/bin/activate
+	curl -o $@ -L --fail https://github.com/grpc/grpc-web/releases/download/$(GRPC_WEB_VERSION)/protoc-gen-grpc-web-$(GRPC_WEB_VERSION)-$(GRPC_WEB_PLATFORM)
+	chmod 755 $@
+
+# Put the pipe in the dependency list as a hack so that CI doesn't try
+# to mess with protoc.  This is a dumb, gross, kludge.
+go/apis/kat/echo.pb.go: | kat-apis/echo.proto venv/bin/protoc venv/bin/protoc-gen-gogofast
+	./venv/bin/protoc \
+		--proto_path=$(CURDIR)/kat-apis \
+		--plugin=$(CURDIR)/venv/bin/protoc-gen-gogofast --gogofast_out=plugins=grpc:$(@D) \
+		$(CURDIR)/$<
+
+kat-sandbox/grpc_web/echo_grpc_web_pb.js: kat-apis/echo.proto venv/bin/protoc venv/bin/protoc-gen-grpc-web
+	./venv/bin/protoc \
+		--proto_path=$(CURDIR)/kat-apis \
+		--plugin=$(CURDIR)/venv/bin/protoc-gen-grpc-web --grpc-web_out=import_style=commonjs,mode=grpcwebtext:$(@D) \
+		$(CURDIR)/$<
+
+kat-sandbox/grpc_web/echo_pb.js: kat-apis/echo.proto venv/bin/protoc
+	./venv/bin/protoc \
+		--proto_path=$(CURDIR)/kat-apis \
+		--js_out=import_style=commonjs:$(@D) \
+		$(CURDIR)/$<
+
+# ------------------------------------------------------------------------------
+# KAT docker-compose sandbox
+# ------------------------------------------------------------------------------
+
+kat-sandbox/http_auth/docker-compose.yml kat-sandbox/grpc_auth/docker-compose.yml kat-sandbox/grpc_web/docker-compose.yaml: %: %.in kat-server.docker $(var.)KAT_SERVER_DOCKER_IMAGE
+	sed 's,@KAT_SERVER_DOCKER_IMAGE@,$(KAT_SERVER_DOCKER_IMAGE),g' < $< > $@
+
+kat-sandbox.http-auth: ## In docker-compose: run Ambassador, an HTTP AuthService, an HTTP backend service, and a TracingService
+kat-sandbox.http-auth: kat-sandbox/http_auth/docker-compose.yml
+	@echo " ---> cleaning HTTP auth kat-sandbox"
+	@cd kat-sandbox/http_auth && docker-compose stop && docker-compose rm -f
+	@echo " ---> starting HTTP auth kat-sandbox"
+	@cd kat-sandbox/http_auth && docker-compose up --force-recreate --abort-on-container-exit --build
+.PHONY: kat-sandbox.http-auth
+
+kat-sandbox.grpc-auth: ## In docker-compose: run Ambassador, a gRPC AuthService, an HTTP backend service, and a TracingService
+kat-sandbox.grpc-auth: kat-sandbox/grpc_auth/docker-compose.yml
+	@echo " ---> cleaning gRPC auth kat-sandbox"
+	@cd kat-sandbox/grpc_auth && docker-compose stop && docker-compose rm -f
+	@echo " ---> starting gRPC auth kat-sandbox"
+	@cd kat-sandbox/grpc_auth && docker-compose up --force-recreate --abort-on-container-exit --build
+.PHONY: kat-sandbox.grpc-auth
+
+kat-sandbox.web: ## In docker-compose: run Ambassador with gRPC-web enabled, and a gRPC backend service
+kat-sandbox.web: kat-sandbox/grpc_web/docker-compose.yaml
+kat-sandbox.web: kat-sandbox/grpc_web/echo_grpc_web_pb.js kat-sandbox/grpc_web/echo_pb.js
+	@echo " ---> cleaning gRPC web kat-sandbox"
+	@cd kat-sandbox/grpc_web && npm install && npx webpack
+	@cd kat-sandbox/grpc_web && docker-compose stop && docker-compose rm -f
+	@echo " ---> starting gRPC web kat-sandbox"
+	@cd kat-sandbox/grpc_web && docker-compose up --force-recreate --abort-on-container-exit --build
+.PHONY: kat-sandbox.web
 
 # ------------------------------------------------------------------------------
 # Virtualenv
