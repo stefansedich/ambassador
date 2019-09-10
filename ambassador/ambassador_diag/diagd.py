@@ -1089,7 +1089,6 @@ class AmbassadorEventWatcher(threading.Thread):
                 if pfx:
                     if not pfx.startswith('/ambassador/v0') or not name.startswith('internal_'):
                         mapping_count += 1
-                        print(f'counting mapping {name} at {pfx}')
 
         if mapping_count:
             env_status.OK('Mappings', f'{mapping_count} Mapping{" is" if (mapping_count == 1) else "s are"} active')
