@@ -290,6 +290,15 @@ def interval_format(seconds, normal_format, now_message):
 
 
 def system_info(app):
+    ir = app.ir
+    run_mode = 'debug'
+    
+    if ir:
+        amod = ir.ambassador_module
+        run_mode = amod.get('run_mode', 'debug')
+
+        app.logger.info(f'RUN_MODE {run_mode}')
+
     status_dict = {'config failure': [False, 'no configuration loaded']}
 
     env_status = getattr(app.watcher, 'env_status', None)
@@ -308,7 +317,8 @@ def system_info(app):
         "latest_snapshot": app.latest_snapshot,
         "env_good": getattr(app.watcher, 'env_good', False),
         "env_failures": getattr(app.watcher, 'failure_list', [ 'no IR loaded' ]),
-        "env_status": status_dict
+        "env_status": status_dict,
+        "run_mode": run_mode
     }
 
 
