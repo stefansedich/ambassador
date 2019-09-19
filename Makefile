@@ -340,8 +340,8 @@ ENVOY_SYNC_DOCKER_TO_HOST = docker run --rm --volume=$(CURDIR)/envoy-src:/xfer:r
 envoy-bin:
 	mkdir -p $@
 envoy-bin/envoy-static: envoy-build-image.txt FORCE | envoy-bin
-	@PS4=; set -ex; if docker run --rm --entrypoint=true $(BASE_ENVOY_IMAGE); then \
-	    docker run --rm --volume=$(CURDIR)/$(@D):/xfer:rw --user=$$(id -u):$$(id -g) $(BASE_ENVOY_IMAGE) cp -a /usr/local/bin/envoy /xfer/$(@F); \
+	@PS4=; set -ex; if docker run --name envoy-static --entrypoint=true $(BASE_ENVOY_IMAGE); then \
+	    docker cp envoy-static:/usr/local/bin/envoy $(CURDIR)/$(@D); \
 	else \
 	    if [ -n '$(CI)' ]; then \
 	        echo 'error: This should not happen in CI: should not try to compile Envoy'; \
